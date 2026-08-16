@@ -14,6 +14,7 @@ import {
   getBasicKeyToByte,
   getSelectedDefinition,
 } from 'src/store/definitionsSlice';
+import {getSelectedConnectedDevice} from 'src/store/devicesSlice';
 import {
   ModalBackground,
   ModalContainer,
@@ -165,6 +166,7 @@ function keycodeFromInput(input: string, basicKeyToByte: Record<string, number>)
 export const KeycodeModal: React.FC<KeycodeModalProps> = (props) => {
   const {t} = useTranslation();
   const selectedDefinition = useAppSelector(getSelectedDefinition);
+  const selectedDevice = useAppSelector(getSelectedConnectedDevice);
   const {basicKeyToByte, byteToKey} = useAppSelector(getBasicKeyToByte);
 
   // 1. 修饰键状态管理
@@ -200,6 +202,9 @@ export const KeycodeModal: React.FC<KeycodeModalProps> = (props) => {
     return Array.from(uniqueMap.values());
   }, [selectedDefinition, basicKeyToByte]);
 
+  if (!selectedDefinition || !selectedDevice) {
+    return null;
+  }
   const [inputItems, setInputItems] = useState(supportedInputItems);
   
   // 转换默认值为字符串

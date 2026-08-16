@@ -2,6 +2,7 @@ import {FC, useState, useEffect} from 'react';
 import {Detail, Label, ControlRow, SpanOverflowCell} from '../grid';
 import {CenterPane} from '../pane';
 import styled from 'styled-components';
+import {useTranslation} from 'react-i18next';
 import {useAppDispatch, useAppSelector} from 'src/store/hooks';
 import {PelpiKeycodeInput} from 'src/components/inputs/pelpi/keycode-input';
 import {getSelectedKeyDefinitions} from 'src/store/definitionsSlice';
@@ -18,7 +19,6 @@ import {
 } from 'src/store/devicesSlice';
 import {KeyboardAPI} from 'src/utils/keyboard-api';
 import {ErrorMessage} from 'src/components/styled';
-import {useTranslation} from 'react-i18next'
 
 const Encoder = styled(CenterPane)`
   height: 100%;
@@ -39,6 +39,7 @@ const renderEncoderError = () => {
     </ErrorMessage>
   );
 };
+const EMPTY_KEYMAP: number[] = [];
 
 export const Pane: FC = () => {
   const {t} = useTranslation();
@@ -50,7 +51,7 @@ export const Pane: FC = () => {
     getSelectedKeyDefinitions,
   );
   const matrixKeycodes = useAppSelector(
-    (state) => getSelectedKeymap(state) || [],
+    (state) => getSelectedKeymap(state) || EMPTY_KEYMAP,
   );
   const layer = useAppSelector(getSelectedLayerIndex);
   const selectedDevice = useAppSelector(getSelectedConnectedDevice);
@@ -111,7 +112,15 @@ export const Pane: FC = () => {
     ccwValue === undefined ||
     cwValue === undefined
   ) {
-    return <SpanOverflowCell>{renderEncoderError()}</SpanOverflowCell>;
+    return (
+      <SpanOverflowCell>
+        <ErrorMessage>
+          {t(
+            'Your current firmware does not support rotary encoders. Install the latest firmware for your device.',
+          )}
+        </ErrorMessage>
+      </SpanOverflowCell>
+    );
   }
   return (
     <SpanOverflowCell>

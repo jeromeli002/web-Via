@@ -3,12 +3,18 @@ import type {
   ConnectedDevice,
   WebVIADevice,
 } from '../types/types';
+
+var lastWriteTimestamp = Date.now();
 // This is a bit cray
 const globalBuffer: {
   [path: string]: {currTime: number; message: Uint8Array}[];
 } = {};
 const eventWaitBuffer: {
   [path: string]: ((a: Uint8Array) => void)[];
+} = {};
+type InputReportHandler = (message: Uint8Array) => boolean;
+const inputReportHandlers: {
+  [path: string]: InputReportHandler[];
 } = {};
 const filterHIDDevices = (devices: HIDDevice[]) =>
   devices.filter((device) =>
@@ -17,6 +23,18 @@ const filterHIDDevices = (devices: HIDDevice[]) =>
         collection.usage === 0x61 && collection.usagePage === 0xff60,
     ),
   );
+
+export const QMK_CONSOLE_FILTER = {
+  usagePage: 0xff31,
+  usage: 0x74,
+};
+
+export const isQMKConsoleDevice = (device: HIDDevice) =>
+  device.collections?.some(
+    (collection) =>
+      collection.usage === QMK_CONSOLE_FILTER.usage &&
+      collection.usagePage === QMK_CONSOLE_FILTER.usagePage,
+  ) ?? false;
 
 const getVIAPathIdentifier = () =>
   (self.crypto && self.crypto.randomUUID && self.crypto.randomUUID()) ||
@@ -58,10 +76,12 @@ const ExtendedHID = {
           usagePage: 0xff60,
           usage: 0x61,
         },
+        QMK_CONSOLE_FILTER,
       ],
     });
-    requestedDevice.forEach(tagDevice);
-    return requestedDevice[0];
+    const viaDevices = filterHIDDevices(requestedDevice);
+    viaDevices.forEach(tagDevice);
+    return viaDevices[0];
   },
   getFilteredDevices: async () => {
     try {
@@ -106,6 +126,7 @@ const ExtendedHID = {
         this.productName = this._hidDevice.productName;
         globalBuffer[this.path] = globalBuffer[this.path] || [];
         eventWaitBuffer[this.path] = eventWaitBuffer[this.path] || [];
+        inputReportHandlers[this.path] = inputReportHandlers[this.path] || [];
         if (!this._hidDevice._device.opened) {
           this.open();
         }
@@ -125,25 +146,42 @@ const ExtendedHID = {
     setupListeners() {
       if (this._hidDevice) {
         this._hidDevice._device.addEventListener('inputreport', (e) => {
+          const message = new Uint8Array(e.data.buffer);
+          const wasHandled = inputReportHandlers[this.path].some((handler) =>
+            handler(message),
+          );
+          if (wasHandled) {
+            return;
+          }
           if (eventWaitBuffer[this.path].length !== 0) {
             // It should be impossible to have a handler in the buffer
             // that has a ts that happened after the current message
             // came in
             (eventWaitBuffer[this.path].shift() as any)(
-              new Uint8Array(e.data.buffer),
+              message,
             );
           } else {
             globalBuffer[this.path].push({
               currTime: Date.now(),
-              message: new Uint8Array(e.data.buffer),
+              message,
             });
           }
         });
       }
     }
 
+    addInputReportHandler(handler: InputReportHandler) {
+      inputReportHandlers[this.path] = inputReportHandlers[this.path] || [];
+      inputReportHandlers[this.path].push(handler);
+      return () => {
+        inputReportHandlers[this.path] = inputReportHandlers[this.path].filter(
+          (registeredHandler) => registeredHandler !== handler,
+        );
+      };
+    }
+
     read(fn: (err?: Error, data?: ArrayBuffer) => void) {
-      this.fastForwardGlobalBuffer(Date.now());
+      this.fastForwardGlobalBuffer(lastWriteTimestamp);
       if (globalBuffer[this.path].length > 0) {
         // this should be a noop normally
         fn(undefined, globalBuffer[this.path].shift()?.message as any);
@@ -188,8 +226,12 @@ const ExtendedHID = {
       }
 
       await this.openPromise;
+      if (this._hidDevice && !this._hidDevice._device.opened) {
+        await this.open();
+      }
       const data = new Uint8Array(arr.slice(1));
-      await this._hidDevice?._device.sendReport(find_reportid, data);
+      lastWriteTimestamp = Date.now();
+      await this._hidDevice?._device.sendReport(0, data);
     }
   },
 };

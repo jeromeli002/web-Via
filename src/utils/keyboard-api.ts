@@ -10,6 +10,8 @@ import {
   logAppError,
   logKeyboardAPIError,
 } from 'src/store/errorsSlice';
+import {KeyboardValue} from './keyboard-values';
+export {KeyboardValue} from './keyboard-values';
 
 // VIA Command IDs
 
@@ -40,6 +42,8 @@ enum APICommand {
   DYNAMIC_KEYMAP_GET_ENCODER = 0x14,
   DYNAMIC_KEYMAP_SET_ENCODER = 0x15,
 
+  UI_SYNC_REQUEST = 0x16,
+
   // DEPRECATED:
   BACKLIGHT_CONFIG_SET_VALUE = 0x07,
   BACKLIGHT_CONFIG_GET_VALUE = 0x08,
@@ -51,13 +55,67 @@ const APICommandValueToName = Object.entries(APICommand).reduce(
   {} as Record<APICommand, string>,
 );
 
-export enum KeyboardValue {
-  UPTIME = 0x01,
-  LAYOUT_OPTIONS = 0x02,
-  SWITCH_MATRIX_STATE = 0x03,
-  FIRMWARE_VERSION = 0x04,
-  DEVICE_INDICATION = 0x05,
+export enum UISyncRequestType {
+  CUSTOM_MENU_ALL = 0x00,
+  CUSTOM_MENU_COMMANDS = 0x01,
+  CUSTOM_MENU_COMMAND_IDS = 0x02,
 }
+
+export type UISyncCustomMenuCommandTarget = {
+  channelId: number;
+  commandId: number;
+};
+
+export type UISyncRequest =
+  | {type: UISyncRequestType.CUSTOM_MENU_ALL}
+  | {
+      type: UISyncRequestType.CUSTOM_MENU_COMMANDS;
+      targets: UISyncCustomMenuCommandTarget[];
+    }
+  | {
+      type: UISyncRequestType.CUSTOM_MENU_COMMAND_IDS;
+      commandIds: number[];
+    };
+
+const UI_SYNC_REQUEST_VERSION = 0x01;
+
+const parseUISyncRequest = (buffer: Uint8Array): UISyncRequest | undefined => {
+  const [command, version, type, count] = buffer;
+  if (
+    command !== APICommand.UI_SYNC_REQUEST ||
+    version !== UI_SYNC_REQUEST_VERSION
+  ) {
+    return undefined;
+  }
+
+  if (type === UISyncRequestType.CUSTOM_MENU_ALL) {
+    return {type};
+  }
+
+  if (type === UISyncRequestType.CUSTOM_MENU_COMMAND_IDS) {
+    return {
+      type,
+      commandIds: Array.from(buffer.slice(4, 4 + count)),
+    };
+  }
+
+  if (type !== UISyncRequestType.CUSTOM_MENU_COMMANDS) {
+    return undefined;
+  }
+
+  const targets: UISyncCustomMenuCommandTarget[] = [];
+  for (let targetIdx = 0; targetIdx < count; targetIdx++) {
+    const offset = 4 + targetIdx * 2;
+    const channelId = buffer[offset];
+    const commandId = buffer[offset + 1];
+    if (channelId === undefined || commandId === undefined) {
+      break;
+    }
+    targets.push({channelId, commandId});
+  }
+
+  return {type, targets};
+};
 
 // RGB Backlight Value IDs
 // const BACKLIGHT_USE_SPLIT_BACKSPACE = 0x01;
@@ -121,7 +179,8 @@ type HIDAddress = string;
 type Layer = number;
 type Row = number;
 type Column = number;
-type CommandQueueArgs = [number, Array<number>] | (() => Promise<void>);
+type CommandQueueArgs =
+  [number, Array<number>, string | undefined] | (() => Promise<void>);
 type CommandQueueEntry = {
   res: (val?: any) => void;
   rej: (error?: any) => void;
@@ -348,22 +407,31 @@ export class KeyboardAPI {
     const res = await this.hidCommand(
       APICommand.CUSTOM_MENU_GET_VALUE,
       commandBytes,
+      'CUSTOM_MENU_GET_VALUE',
     );
     return res.slice(0 + commandBytes.length);
   }
 
   async setCustomMenuValue(...args: number[]): Promise<void> {
-    await this.hidCommand(APICommand.CUSTOM_MENU_SET_VALUE, args);
+    await this.hidCommand(
+      APICommand.CUSTOM_MENU_SET_VALUE,
+      args,
+      'CUSTOM_MENU_SET_VALUE',
+    );
   }
 
   async getPerKeyRGBMatrix(ledIndexMapping: number[]): Promise<number[][]> {
     const res = await Promise.all(
       ledIndexMapping.map((ledIndex) =>
-        this.hidCommand(APICommand.CUSTOM_MENU_GET_VALUE, [
-          ...PER_KEY_RGB_CHANNEL_COMMAND,
-          ledIndex,
-          1, // count
-        ]),
+        this.hidCommand(
+          APICommand.CUSTOM_MENU_GET_VALUE,
+          [
+            ...PER_KEY_RGB_CHANNEL_COMMAND,
+            ledIndex,
+            1, // count
+          ],
+          'CUSTOM_MENU_GET_VALUE',
+        ),
       ),
     );
     return res.map((r) => [...r.slice(5, 7)]);
@@ -374,13 +442,17 @@ export class KeyboardAPI {
     hue: number,
     sat: number,
   ): Promise<void> {
-    await this.hidCommand(APICommand.CUSTOM_MENU_SET_VALUE, [
-      ...PER_KEY_RGB_CHANNEL_COMMAND,
-      index,
-      1, // count
-      hue,
-      sat,
-    ]);
+    await this.hidCommand(
+      APICommand.CUSTOM_MENU_SET_VALUE,
+      [
+        ...PER_KEY_RGB_CHANNEL_COMMAND,
+        index,
+        1, // count
+        hue,
+        sat,
+      ],
+      'CUSTOM_MENU_SET_VALUE',
+    );
   }
 
   async getBacklightValue(
@@ -456,7 +528,11 @@ export class KeyboardAPI {
   }
 
   async commitCustomMenu(channel: number) {
-    await this.hidCommand(APICommand.CUSTOM_MENU_SAVE, [channel]);
+    await this.hidCommand(
+      APICommand.CUSTOM_MENU_SAVE,
+      [channel],
+      'CUSTOM_MENU_SAVE',
+    );
   }
 
   async saveLighting() {
@@ -591,15 +667,31 @@ export class KeyboardAPI {
     });
   }
 
+  isCommandQueueIdle() {
+    return (
+      !this.commandQueueWrapper.isFlushing &&
+      this.commandQueueWrapper.commandQueue.length === 0
+    );
+  }
+
+  async waitForCommandQueueIdle() {
+    if (this.isCommandQueueIdle()) {
+      return;
+    }
+
+    await this.timeout(0);
+  }
+
   async hidCommand(
     command: Command,
     bytes: Array<number> = [],
+    commandName?: string,
   ): Promise<number[]> {
     return new Promise((res, rej) => {
       this.commandQueueWrapper.commandQueue.push({
         res,
         rej,
-        args: [command, bytes],
+        args: [command, bytes, commandName],
       });
       if (!this.commandQueueWrapper.isFlushing) {
         this.flushQueue();
@@ -642,7 +734,23 @@ export class KeyboardAPI {
     return cache[this.kbAddr].hid;
   }
 
-  async _hidCommand(command: Command, bytes: Array<number> = []): Promise<any> {
+  addUISyncRequestHandler(handler: (request: UISyncRequest) => void) {
+    return this.getHID().addInputReportHandler((buffer: Uint8Array) => {
+      const request = parseUISyncRequest(buffer);
+      if (!request) {
+        return false;
+      }
+
+      handler(request);
+      return true;
+    });
+  }
+
+  async _hidCommand(
+    command: Command,
+    bytes: Array<number> = [],
+    commandName?: string,
+  ): Promise<any> {
     const commandBytes = [...[COMMAND_START, command], ...bytes];
     const paddedArray = new Array(33).fill(0);
     commandBytes.forEach((val, idx) => {
@@ -663,10 +771,9 @@ export class KeyboardAPI {
       );
 
       const deviceInfo = extractDeviceInfo(this.getHID());
-      const commandName = APICommandValueToName[command];
       store.dispatch(
         logKeyboardAPIError({
-          commandName,
+          commandName: commandName ?? APICommandValueToName[command],
           commandBytes: commandBytes.slice(1),
           responseBytes: buffer,
           deviceInfo,

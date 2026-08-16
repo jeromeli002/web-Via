@@ -26,21 +26,28 @@ import {
   getSelectedDevicePath,
   getSupportedIds,
   selectDevice,
+  markDeviceReady,
   setForceAuthorize,
   updateConnectedDevices,
+  updateInvalidProtocolDevices,
+  updateUnresolvedDefinitionDevices,
   updateSupportedIds,
 } from './devicesSlice';
 import type {
   AuthorizedDevice,
+  AuthorizedDevices,
   ConnectedDevice,
   ConnectedDevices,
+  Device,
   WebVIADevice,
 } from 'src/types/types';
 import {createRetry} from 'src/utils/retry';
 import {extractDeviceInfo, logAppError} from './errorsSlice';
 import {tryForgetDevice} from 'src/shims/node-hid';
 import {isAuthorizedDeviceConnected} from 'src/utils/type-predicates';
-import {loadFirmwareVersion} from './firmwareSlice';
+import {loadFirmwareVersion, loadKeycodesVersion} from './firmwareSlice';
+import {loadDefinitionName} from './definitionNameSlice';
+import {KeycodesVersionProtocolError} from 'src/utils/keycodes-version';
 
 const selectConnectedDeviceRetry = createRetry(8, 100);
 
@@ -62,6 +69,7 @@ const selectConnectedDevice =
   async (dispatch) => {
     const deviceInfo = extractDeviceInfo(connectedDevice);
     try {
+      await dispatch(loadKeycodesVersion(connectedDevice));
       dispatch(selectDevice(connectedDevice));
       // John you drongo, don't trust the compiler, dispatches are totes awaitable for async thunks
       await dispatch(loadMacros(connectedDevice));
@@ -73,6 +81,7 @@ const selectConnectedDevice =
           // John you drongo, don't trust the compiler, dispatches are totes awaitable for async thunks
           await dispatch(updateLightingData(connectedDevice));
         } else if (protocol >= 11) {
+          await dispatch(loadDefinitionName(connectedDevice));
           await dispatch(loadFirmwareVersion(connectedDevice));
           // John you drongo, don't trust the compiler, dispatches are totes awaitable for async thunks
           await dispatch(updateV3MenuData(connectedDevice));
@@ -88,8 +97,13 @@ const selectConnectedDevice =
 
       // John you drongo, don't trust the compiler, dispatches are totes awaitable for async thunks
       await dispatch(loadKeymapFromDevice(connectedDevice));
+      dispatch(markDeviceReady(connectedDevice.path));
       selectConnectedDeviceRetry.clear();
     } catch (e) {
+      if (e instanceof KeycodesVersionProtocolError) {
+        selectConnectedDeviceRetry.clear();
+        return;
+      }
       if (selectConnectedDeviceRetry.retriesLeft()) {
         dispatch(
           logAppError({
@@ -152,6 +166,30 @@ export const reloadConnectedDevices =
         );
       });
     }
+    dispatch(
+      updateInvalidProtocolDevices(
+        recognisedDevicesWithBadProtocol.reduce<Record<string, Device>>(
+          (devices, device) => {
+            const {
+              path,
+              productId,
+              vendorId,
+              productName,
+              interface: intf,
+            } = device;
+            devices[path] = {
+              path,
+              productId,
+              vendorId,
+              productName,
+              interface: intf,
+            };
+            return devices;
+          },
+          {},
+        ),
+      ),
+    );
 
     const authorizedDevices: AuthorizedDevice[] = recognisedDevices
       .filter((_, i) => protocolVersions[i] !== -1)
@@ -187,6 +225,15 @@ export const reloadConnectedDevices =
         };
         return devices;
       }, {});
+
+    const unresolvedDefinitionDevices = authorizedDevices
+      .filter((device) => !isAuthorizedDeviceConnected(device, newDefinitions))
+      .reduce<AuthorizedDevices>((devices, device) => {
+        devices[device.path] = device;
+        return devices;
+      }, {});
+
+    dispatch(updateUnresolvedDefinitionDevices(unresolvedDefinitionDevices));
 
     // Remove authorized devices that we could not find definitions for
     authorizedDevices
