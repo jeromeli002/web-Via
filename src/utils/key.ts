@@ -1083,10 +1083,9 @@ export function getKeycodes(numMacros = 16): IKeycodeMenu[] {
       label: 'Commonly_Used',
       width: 'label',
       keycodes: [
-        {name: 'WinLock', code: 'WIN_LOCK', title:  'Windows Lock'},
-        {name: 'BOOT', code: 'BOOT', title:  'Botloader'},
+        {name: 'BOOT', code: 'QK_BOOT', title:  'Botloader'},
         {name: 'Clean EEPROM', code: 'QK_CLEAR_EEPROM', title:  'CLEAR_EEPROM'},
-        {name:  'CWT',code:'CAPS_WORD_TOGGLE', title:  'CAPS_WORD_TOGGLE'},
+        {name:  'CWT',code:'CW_TOGG', title:  'CAPS_WORD_TOGGLE'},
         {name:  'FN',code:'MO(1)', title:  'MO(1),同量产键盘的FN'},
         {name:  'BLE0',code:'BLE0', title:  'BLE0'},
         {name:  'BLE1',code:'BLE1', title:  'BLE1'},

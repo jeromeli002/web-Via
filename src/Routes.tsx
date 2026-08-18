@@ -1,5 +1,5 @@
 import {UnconnectedGlobalMenu} from './components/menus/global';
-import {Route} from 'wouter';
+import {Route, Router} from 'wouter';
 import PANES from './utils/pane-config';
 import {Home} from './components/Home';
 import {createGlobalStyle} from 'styled-components';
@@ -26,6 +26,21 @@ const PersistentPane = styled.div<{$active: boolean}>`
   min-height: 0;
 `;
 
+// 计算当前部署的 base 路径（支持任意子目录）
+const getBase = () => {
+  if (import.meta.env.DEV) return '';
+  const base = import.meta.env.BASE_URL;
+  if (base === './' || base === '') {
+    // 取当前页面路径的目录部分
+    const path = window.location.pathname;
+    // 去掉末尾的 index.html 或文件名
+    return path.endsWith('/')
+      ? path.slice(0, -1)
+      : path.replace(/\/[^/]*$/, '') || '';
+  }
+  return base.replace(/\/$/, '');
+};
+
 export default () => {
   const hasHIDSupport = 'hid' in navigator || OVERRIDE_HID_CHECK;
 
@@ -44,22 +59,23 @@ export default () => {
 
   const CanvasRouter = renderMode === '2D' ? CanvasRouter2D : CanvasRouter3D;
   const testContextState = useState({clearTestKeys: () => {}});
-  return (
-    <>
-        <TestContext.Provider value={testContextState}>
-          <GlobalStyle />
-          {hasHIDSupport && <UnconnectedGlobalMenu />}
-          <CanvasRouter />
 
-          <Home hasHIDSupport={hasHIDSupport}>
-            {RouteComponents}
-            {showConsoleTab && (
-              <PersistentPane $active={location === '/console'}>
-                <HIDConsole isActive={location === '/console'} />
-              </PersistentPane>
-            )}
-          </Home>
-        </TestContext.Provider>
-    </>
+  return (
+    <Router base={getBase()}>
+      <TestContext.Provider value={testContextState}>
+        <GlobalStyle />
+        {hasHIDSupport && <UnconnectedGlobalMenu />}
+        <CanvasRouter />
+
+        <Home hasHIDSupport={hasHIDSupport}>
+          {RouteComponents}
+          {showConsoleTab && (
+            <PersistentPane $active={location === '/console'}>
+              <HIDConsole isActive={location === '/console'} />
+            </PersistentPane>
+          )}
+        </Home>
+      </TestContext.Provider>
+    </Router>
   );
 };

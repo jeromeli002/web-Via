@@ -73,8 +73,8 @@ export async function syncStore(): Promise<DefinitionIndex> {
     if (hash === currentDefinitionIndex.hash) {
       return currentDefinitionIndex;
     }
-    // Get definition index file
-    const response = await fetch('/definitions/supported_kbs.json', {
+    // Get definition index file（改成相对路径）
+    const response = await fetch(`${import.meta.env.BASE_URL}definitions/supported_kbs.json`, {
       cache: 'reload',
     });
     const json: KeyboardDefinitionIndex = await response.json();
@@ -122,7 +122,8 @@ export const getMissingDefinition = async <
   version: K,
 ): Promise<[DefinitionVersionMap[K], K]> => {
   const vpid = getVendorProductId(device.vendorId, device.productId);
-  const url = `/definitions/${version}/${vpid}.json`;
+  // 改成相对路径
+  const url = `${import.meta.env.BASE_URL}definitions/${version}/${vpid}.json`;
   const response = await fetch(url);
   const json: DefinitionVersionMap[K] = await response.json();
   let definitions = deviceStore.get('definitions');

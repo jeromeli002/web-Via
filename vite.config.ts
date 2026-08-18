@@ -9,6 +9,7 @@ const hash = fs.readFileSync('public/definitions/hash.json', 'utf8');
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  base: './', // 使用相对路径，支持任意目录部署
   plugins: [
     react(),
     createHtmlPlugin({

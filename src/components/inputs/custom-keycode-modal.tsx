@@ -188,8 +188,8 @@ export const KeycodeModal: React.FC<KeycodeModalProps> = (props) => {
     }));
 
     // 获取当前键盘特定的键 (如特殊宏、灯光键)
-    const definitionItems = selectedDefinition 
-      ? getKeycodesForKeyboard(selectedDefinition).map(k => ({
+    const definitionItems = selectedDefinition && selectedDevice
+      ? getKeycodesForKeyboard(selectedDefinition, selectedDevice.protocol).map(k => ({
           code: k.code,
           label: k.title ?? k.name,
         }))

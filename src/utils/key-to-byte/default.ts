@@ -312,6 +312,9 @@ export default {
   DIAL_R: 0x7fb3,
   DIAL_LC: 0x7fb4,
   DIAL_RC: 0x7fb5,
+  //其他
+  QK_BOOT: 0x7c00,
+  CW_TOGG: 0x7c73,
   //无线
   BLE0: 0x7793,
   BLE1: 0x7794,
