@@ -24,16 +24,15 @@ export const MenuCell = styled(Cell)`
   overflow-x: hidden;
   overflow-y: auto;
 
-  /* Put the vertical scrollbar on the left */
   direction: rtl;
 
-  /* Space between the scrollbar and the menu icons */
-  padding-left: 8px;
-  scrollbar-gutter: stable;
+  width: fit-content;
 
-  /* Restore normal direction for menu contents */
+  padding-right: 8px;
+
   > * {
     direction: ltr;
+    width: fit-content;
   }
 `;
 
